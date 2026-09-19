@@ -1,0 +1,29 @@
+# Dependencies & Virtualenvs
+node_modules/
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.hypothesis/
+
+# Build & Bundler outputs
+dist/
+build/
+*.egg-info/
+
+# Environment configurations
+.env
+.env.local
+*.env
+
+# IDE & Operating System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.kiro/
