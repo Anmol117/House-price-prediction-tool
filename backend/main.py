@@ -1,21 +1,21 @@
 """
-FastAPI application entry point for the House Price Prediction API.
+FastAPI application entry point for the Indian House Price Prediction API.
 
 This module initializes the FastAPI application, configures middleware
 (CORS, 1MB size limit), sets up global error handlers returning standardized JSON errors,
-and mounts prediction and health routes.
+and mounts prediction, options, model-info, and health routes.
 """
 
 import os
 import sys
 import logging
-from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from contextlib import asynccontextmanager
 
 from models import ModelServer
 from routes import router, set_model_server
@@ -41,7 +41,7 @@ def validate_port(port_str: str) -> int:
         sys.exit(1)
 
 # Get configuration from environment variables
-MODEL_PATH = os.getenv("MODEL_PATH")
+MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")
 PORT = validate_port(os.getenv("PORT", "8000"))
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
 
@@ -49,28 +49,24 @@ CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,
 if MODEL_PATH and not os.path.isabs(MODEL_PATH):
     MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), MODEL_PATH))
 
-# Validate required environment variables
-if not MODEL_PATH:
-    print("MODEL_PATH environment variable is required", file=sys.stderr)
-    sys.exit(1)
-
-from contextlib import asynccontextmanager
-
 # Initialize Model Server
 model_server = ModelServer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load model on application startup."""
-    model_server.load_model(MODEL_PATH)
+    if os.path.exists(MODEL_PATH):
+        model_server.load_model(MODEL_PATH)
+    else:
+        logger.warning(f"Model file not found at {MODEL_PATH}. Prediction endpoints will be unavailable.")
     set_model_server(model_server)
     yield
 
 # Initialize FastAPI application
 app = FastAPI(
-    title="House Price Prediction API",
-    description="REST API for predicting house prices using a trained Linear Regression model",
-    version="1.0.0",
+    title="HomeValuate AI - Indian House Price Prediction API",
+    description="REST API for predicting Indian residential property prices using trained machine learning models",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -99,7 +95,7 @@ async def limit_request_size(request: Request, call_next):
         )
     return await call_next(request)
 
-# 3. Global Exception Handlers (Requirement 11.5: JSON with "error" field)
+# 3. Global Exception Handlers
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Format validation errors as clean error strings."""
@@ -141,33 +137,9 @@ app.include_router(router)
 async def root():
     """Root endpoint returning API status and information."""
     return {
-        "name": "House Price Prediction API",
-        "version": "1.0.0",
+        "name": "HomeValuate AI - Indian House Price Prediction API",
+        "version": "2.0.0",
         "status": "running"
-    }
-
-@app.get("/model-info")
-async def get_model_info():
-    """Return metadata about the prediction model."""
-    return {
-        "model_type": "Linear Regression",
-        "features": [
-            {"name": "square_footage", "type": "numeric", "description": "Property size in square feet (1 - 100,000)"},
-            {"name": "bedrooms", "type": "integer", "description": "Number of bedrooms (0 - 20)"},
-            {"name": "bathrooms", "type": "numeric", "description": "Number of bathrooms with 0.5 precision (0 - 20)"},
-            {"name": "location", "type": "string", "description": "Property location (max 200 alphanumeric characters)"},
-            {"name": "year_built", "type": "integer", "description": "Year built (1800 - current year + 1)"}
-        ],
-        "preprocessing": [
-            "Input sanitization: removal of special disallowed characters",
-            "Location hash encoding: mapped to integer space",
-            "Feature scaling & normalization"
-        ],
-        "metrics": {
-            "r2_score": 0.9450,
-            "rmse": 14850.25,
-            "unit": "USD"
-        }
     }
 
 if __name__ == "__main__":

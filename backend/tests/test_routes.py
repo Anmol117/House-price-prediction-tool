@@ -4,7 +4,7 @@ Unit tests for API routes.
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 import sys
 import os
 
@@ -21,8 +21,25 @@ def mock_model_server():
     """Create a mock ModelServer for testing."""
     mock_server = Mock(spec=ModelServer)
     mock_server.is_loaded = True
-    mock_server.predict = Mock(return_value=850000.00)
-    mock_server.calculate_confidence_interval = Mock(return_value=(800000.00, 900000.00))
+    mock_server.predict = Mock(return_value=(8200000.00, 3353800.00, 23460200.00))
+    mock_server.calculate_confidence_interval = Mock(return_value=(3353800.00, 23460200.00))
+    mock_server.get_options = Mock(return_value={
+        "cities": ["Bengaluru", "Mumbai", "Pune"],
+        "localities": {"Pune": ["Wakad", "Baner", "Other"]},
+        "property_types": ["Apartment", "Villa"],
+        "furnishing_types": ["Furnished", "Semi-furnished", "Unfurnished"]
+    })
+    mock_server.get_model_info = Mock(return_value={
+        "best_model": "Random Forest",
+        "features": ["area_sqft", "bhk", "bathrooms", "city", "locality", "property_type", "furnishing"],
+        "benchmark": [
+            {"model": "Linear Regression", "r2": 0.1502, "mae": 4817168.01, "rmse": 13049671.28},
+            {"model": "Random Forest", "r2": 0.4278, "mae": 4752048.42, "rmse": 10708244.89},
+            {"model": "Gradient Boosting", "r2": 0.3656, "mae": 4802673.11, "rmse": 11274847.46}
+        ],
+        "interval_ratios": {"lower": 0.409, "upper": 2.861},
+        "dataset_summary": {"total_records": 29624}
+    })
     return mock_server
 
 
@@ -36,14 +53,16 @@ def client(mock_model_server):
 class TestPredictEndpoint:
     """Test cases for POST /predict endpoint."""
     
-    def test_predict_valid_input(self, client, mock_model_server):
-        """Test prediction with valid property details."""
+    def test_predict_valid_indian_input(self, client, mock_model_server):
+        """Test prediction with valid Indian property details."""
         request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
+            "area_sqft": 1150.0,
+            "bhk": 2,
+            "bathrooms": 2.0,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
@@ -52,23 +71,28 @@ class TestPredictEndpoint:
         data = response.json()
         
         assert "predicted_price" in data
-        assert "confidence_metrics" in data
-        assert "confidence_interval" in data["confidence_metrics"]
-        assert "lower_bound" in data["confidence_metrics"]["confidence_interval"]
-        assert "upper_bound" in data["confidence_metrics"]["confidence_interval"]
+        assert "price_range" in data
+        assert data["currency"] == "INR"
+        assert "lower" in data["price_range"]
+        assert "upper" in data["price_range"]
+        assert data["predicted_price"] == 8200000.00
+        assert data["price_range"]["lower"] == 3353800.00
+        assert data["price_range"]["upper"] == 23460200.00
         
-        # Verify values are rounded to 2 decimal places
-        assert isinstance(data["predicted_price"], float)
-        assert data["predicted_price"] == 850000.00
+        # Check backward compatibility fields
+        assert "confidence_metrics" in data
+        assert "lower_bound" in data["confidence_metrics"]["confidence_interval"]
     
     def test_predict_missing_field(self, client):
         """Test prediction with missing required field."""
         request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            # location is missing
-            "year_built": 2015
+            "area_sqft": 1150.0,
+            "bhk": 2,
+            "bathrooms": 2.0,
+            # city is missing
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
@@ -76,99 +100,87 @@ class TestPredictEndpoint:
         assert response.status_code == 400
         assert "error" in response.json()
     
-    def test_predict_invalid_square_footage(self, client):
-        """Test prediction with out-of-range square_footage."""
+    def test_predict_invalid_area_sqft(self, client):
+        """Test prediction with out-of-range area_sqft."""
         request_data = {
-            "square_footage": 150000.0,  # Exceeds max of 100000
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
+            "area_sqft": 50000.0,  # Exceeds max 20000
+            "bhk": 2,
+            "bathrooms": 2.0,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
-        
         assert response.status_code == 400
         assert "error" in response.json()
-    
-    def test_predict_invalid_bedrooms(self, client):
-        """Test prediction with out-of-range bedrooms."""
+
+    def test_predict_invalid_bhk(self, client):
+        """Test prediction with out-of-range bhk."""
         request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 25,  # Exceeds max of 20
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
+            "area_sqft": 1200.0,
+            "bhk": 15,  # Exceeds max 10
+            "bathrooms": 2.0,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
-        
         assert response.status_code == 400
         assert "error" in response.json()
-    
-    def test_predict_invalid_year_built(self, client):
-        """Test prediction with year_built too far in future."""
+
+    def test_predict_unsupported_city(self, client, mock_model_server):
+        """Test prediction when city is unsupported."""
+        mock_model_server.predict.side_effect = ValueError("Unsupported city 'Atlantis'")
+        
         request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2050  # Too far in future
+            "area_sqft": 1150.0,
+            "bhk": 2,
+            "bathrooms": 2.0,
+            "city": "Atlantis",
+            "locality": "Unknown",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
-        
         assert response.status_code == 400
-        assert "error" in response.json()
-    
-    def test_predict_invalid_location_characters(self, client):
-        """Test prediction with invalid characters in location."""
-        request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco @ CA #123",  # Invalid characters
-            "year_built": 2015
-        }
-        
-        response = client.post("/predict", json=request_data)
-        
-        assert response.status_code == 400
-        assert "error" in response.json()
+        assert "Unsupported city" in response.json()["error"]
     
     def test_predict_model_failure(self, client, mock_model_server):
         """Test prediction when model fails."""
-        mock_model_server.predict.side_effect = Exception("Model error")
+        mock_model_server.predict.side_effect = Exception("Model calculation failed")
         
         request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
+            "area_sqft": 1150.0,
+            "bhk": 2,
+            "bathrooms": 2.0,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
         }
         
         response = client.post("/predict", json=request_data)
-        
         assert response.status_code == 500
-    
-    def test_predict_sanitizes_location(self, client, mock_model_server):
-        """Test that location is sanitized before prediction."""
-        request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
-        }
-        
-        response = client.post("/predict", json=request_data)
-        
-        # Should succeed
+
+
+class TestOptionsEndpoint:
+    """Test cases for GET /options endpoint."""
+
+    def test_options_returns_metadata_lists(self, client, mock_model_server):
+        """Test options endpoint returns cities and property types."""
+        response = client.get("/options")
         assert response.status_code == 200
-        
-        # Verify predict was called (location would have been sanitized)
-        mock_model_server.predict.assert_called_once()
+        data = response.json()
+        assert "cities" in data
+        assert "localities" in data
+        assert "property_types" in data
+        assert "furnishing_types" in data
+        assert "Pune" in data["cities"]
 
 
 class TestHealthEndpoint:
@@ -180,10 +192,8 @@ class TestHealthEndpoint:
         set_model_server(mock_model_server)
         
         response = client.get("/health")
-        
         assert response.status_code == 200
         data = response.json()
-        
         assert data["status"] == "healthy"
         assert data["model_loaded"] is True
     
@@ -194,10 +204,8 @@ class TestHealthEndpoint:
         set_model_server(mock_server)
         
         response = client.get("/health")
-        
         assert response.status_code == 503
         data = response.json()
-        
         assert data["status"] == "unhealthy"
         assert data["model_loaded"] is False
     
@@ -206,63 +214,49 @@ class TestHealthEndpoint:
         set_model_server(None)
         
         response = client.get("/health")
-        
         assert response.status_code == 503
         data = response.json()
-        
         assert data["status"] == "unhealthy"
         assert data["model_loaded"] is False
 
 
-class TestResponseFormat:
-    """Test cases for response format validation."""
-    
-    def test_predicted_price_rounded_to_2_decimals(self, client, mock_model_server):
-        """Test that predicted_price is rounded to 2 decimal places."""
-        # Return a price with more than 2 decimals
-        mock_model_server.predict.return_value = 850123.456789
-        mock_model_server.calculate_confidence_interval.return_value = (
-            800000.123456,
-            900000.987654
-        )
+class TestRealModelServerIntegration:
+    """Integration test using the actual loaded model.joblib."""
+
+    def test_real_model_prediction_pune(self):
+        """Test that the real model predicts realistic prices for Wakad, Pune."""
+        ms = ModelServer()
+        model_path = os.path.join(os.path.dirname(__file__), "..", "models", "model.joblib")
+        if not os.path.exists(model_path):
+            pytest.skip("model.joblib not present")
         
-        request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
-        }
+        ms.load_model(model_path)
+        assert ms.is_loaded is True
         
-        response = client.post("/predict", json=request_data)
+        pred, low, high = ms.predict({
+            "area_sqft": 1150,
+            "bhk": 2,
+            "bathrooms": 2,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
+        })
         
-        assert response.status_code == 200
-        data = response.json()
+        # Wakad 2 BHK should be around 70 Lakhs to 95 Lakhs (target ~82 Lakhs)
+        assert 6000000 <= pred <= 11000000
+        assert low < pred < high
         
-        # Verify rounding to 2 decimal places
-        assert data["predicted_price"] == 850123.46
-        assert data["confidence_metrics"]["confidence_interval"]["lower_bound"] == 800000.12
-        assert data["confidence_metrics"]["confidence_interval"]["upper_bound"] == 900000.99
-    
-    def test_response_structure(self, client, mock_model_server):
-        """Test that response has correct structure."""
-        request_data = {
-            "square_footage": 2500.0,
-            "bedrooms": 4,
-            "bathrooms": 2.5,
-            "location": "San Francisco, CA",
-            "year_built": 2015
-        }
-        
-        response = client.post("/predict", json=request_data)
-        
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify structure matches PredictionResponse schema
-        assert set(data.keys()) == {"predicted_price", "confidence_metrics"}
-        assert set(data["confidence_metrics"].keys()) == {"confidence_interval"}
-        assert set(data["confidence_metrics"]["confidence_interval"].keys()) == {
-            "lower_bound",
-            "upper_bound"
-        }
+        # Test determinism: same input gives exact same output
+        pred2, low2, high2 = ms.predict({
+            "area_sqft": 1150,
+            "bhk": 2,
+            "bathrooms": 2,
+            "city": "Pune",
+            "locality": "Wakad",
+            "property_type": "Apartment",
+            "furnishing": "Semi-furnished"
+        })
+        assert pred == pred2
+        assert low == low2
+        assert high == high2

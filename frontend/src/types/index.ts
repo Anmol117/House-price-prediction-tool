@@ -1,16 +1,23 @@
 /**
- * Type definitions for the House Price Prediction application.
+ * Type definitions for the HomeValuate AI Indian Real Estate Price Prediction application.
  */
 
 export interface FormData {
-  square_footage: string;
-  bedrooms: string;
+  area_sqft: string;
+  bhk: string;
   bathrooms: string;
-  location: string;
-  year_built: string;
+  city: string;
+  locality: string;
+  property_type: string;
+  furnishing: string;
 }
 
 export type ValidationErrors = Partial<Record<keyof FormData, string>>;
+
+export interface PriceRange {
+  lower: number;
+  upper: number;
+}
 
 export interface ConfidenceInterval {
   lower_bound: number;
@@ -23,7 +30,16 @@ export interface ConfidenceMetrics {
 
 export interface PredictionResult {
   predicted_price: number;
-  confidence_metrics: ConfidenceMetrics;
+  price_range: PriceRange;
+  currency: string;
+  confidence_metrics?: ConfidenceMetrics;
+}
+
+export interface OptionsData {
+  cities: string[];
+  localities: Record<string, string[]>;
+  property_types: string[];
+  furnishing_types: string[];
 }
 
 export type ErrorType = 'validation' | 'network' | 'server' | 'timeout';
@@ -33,21 +49,26 @@ export interface ErrorObject {
   message: string;
 }
 
-export interface ModelFeature {
-  name: string;
-  type: string;
-  description: string;
-}
-
-export interface ModelMetrics {
-  r2_score: number;
+export interface BenchmarkItem {
+  model: string;
+  r2: number;
+  mae: number;
   rmse: number;
-  unit: string;
 }
 
 export interface ModelInfoData {
-  model_type: string;
-  features: ModelFeature[];
-  preprocessing: string[];
-  metrics: ModelMetrics;
+  best_model: string;
+  features: string[];
+  benchmark: BenchmarkItem[];
+  interval_ratios: {
+    lower: number;
+    upper: number;
+  };
+  dataset_summary: {
+    total_records: number;
+    train_records?: number;
+    test_records?: number;
+    cities_count?: number;
+    source?: string;
+  };
 }

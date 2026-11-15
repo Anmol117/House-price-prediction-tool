@@ -1,10 +1,9 @@
 """
 Pydantic models for API request and response validation.
+Configured for Indian Residential Property Market.
 """
 
-import re
-from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional, Dict, List, Any
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -12,104 +11,92 @@ class PropertyDetailsRequest(BaseModel):
     """
     Request model for property details used in price prediction.
     
-    Validates all property input fields according to requirements:
-    - square_footage: 1-100000
-    - bedrooms: 0-20
-    - bathrooms: 0-20
-    - location: max 200 chars, alphanumeric + spaces, commas, periods, hyphens, apostrophes
-    - year_built: 1800 to current_year+1
-    
-    Requirements: 2.2, 10.1-10.6, 11.1
+    Validates all property input fields according to Indian market requirements:
+    - area_sqft: 200 - 20,000 sq ft
+    - bhk: 1 - 10 BHK
+    - bathrooms: 1 - 10 bathrooms
+    - city: non-empty string, e.g. "Pune", "Bengaluru", "Mumbai", etc.
+    - locality: non-empty string, e.g. "Wakad", "Whitefield", "Andheri West", etc.
+    - property_type: "Apartment", "Builder Floor", "Independent House", "Villa"
+    - furnishing: "Furnished", "Semi-furnished", "Unfurnished"
     """
     
-    square_footage: float = Field(
+    area_sqft: float = Field(
         ...,
-        ge=1,
-        le=100000,
-        description="Square footage of the property (1-100000)"
+        ge=200,
+        le=20000,
+        description="Super built-up / carpet area in square feet (200 - 20,000)"
     )
     
-    bedrooms: int = Field(
+    bhk: int = Field(
         ...,
-        ge=0,
-        le=20,
-        description="Number of bedrooms (0-20)"
+        ge=1,
+        le=10,
+        description="Number of bedrooms / BHK (1 - 10)"
     )
     
     bathrooms: float = Field(
         ...,
-        ge=0,
-        le=20,
-        description="Number of bathrooms (0-20)"
+        ge=1,
+        le=10,
+        description="Number of bathrooms (1 - 10)"
     )
     
-    location: str = Field(
+    city: str = Field(
         ...,
-        max_length=200,
-        description="Property location (max 200 characters)"
+        min_length=1,
+        max_length=100,
+        description="City name (e.g. Pune, Bengaluru, Mumbai)"
     )
     
-    year_built: int = Field(
+    locality: str = Field(
         ...,
-        ge=1800,
-        description="Year the property was built (1800-present)"
+        min_length=1,
+        max_length=100,
+        description="Locality / Neighborhood name within the city"
     )
     
-    @field_validator('location')
-    @classmethod
-    def validate_location_characters(cls, v: str) -> str:
-        """
-        Validate that location contains only allowed characters:
-        alphanumeric, spaces, commas, periods, hyphens, apostrophes.
-        
-        Requirements: 10.5
-        """
-        if not v:
-            return v
-        
-        # Pattern to check if string contains only allowed characters
-        pattern = r"^[a-zA-Z0-9 ,.\-']+$"
-        
-        if not re.match(pattern, v):
-            raise ValueError(
-                "Location must contain only alphanumeric characters, spaces, "
-                "commas, periods, hyphens, and apostrophes"
-            )
-        
-        return v
+    property_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Property type (Apartment, Builder Floor, Independent House, Villa)"
+    )
     
-    @field_validator('year_built')
-    @classmethod
-    def validate_year_built_max(cls, v: int) -> int:
-        """
-        Validate that year_built is not greater than current_year + 1.
-        
-        Requirements: 10.4
-        """
-        current_year = datetime.now().year
-        max_year = current_year + 1
-        
-        if v > max_year:
-            raise ValueError(
-                f"Year built must be between 1800 and {max_year}"
-            )
-        
-        return v
+    furnishing: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Furnishing status (Furnished, Semi-furnished, Unfurnished)"
+    )
     
+    @field_validator('city', 'locality', 'property_type', 'furnishing')
+    @classmethod
+    def strip_and_validate_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty or whitespace only")
+        return stripped
+
     model_config = {
-        # Ensure field names are case-sensitive and exact
         "extra": "forbid",  # Reject unknown fields
     }
+
+
+class PriceRange(BaseModel):
+    """
+    Empirical 90% prediction interval for the estimated price.
+    """
+    lower: float = Field(..., description="Lower bound of predicted price in INR")
+    upper: float = Field(..., description="Upper bound of predicted price in INR")
 
 
 class ConfidenceMetrics(BaseModel):
     """
     Model for confidence metrics in prediction response.
-    
-    Requirements: 11.3
+    Maintains compatibility with lower_bound/upper_bound structure.
     """
-    
-    confidence_interval: dict[str, float] = Field(
+    confidence_interval: Dict[str, float] = Field(
         ...,
         description="Confidence interval with lower_bound and upper_bound"
     )
@@ -117,45 +104,74 @@ class ConfidenceMetrics(BaseModel):
     @field_validator('confidence_interval')
     @classmethod
     def validate_confidence_interval_structure(cls, v: dict) -> dict:
-        """Ensure confidence_interval has required keys."""
         if 'lower_bound' not in v or 'upper_bound' not in v:
             raise ValueError(
                 "confidence_interval must contain 'lower_bound' and 'upper_bound' keys"
             )
-        
         return v
 
 
 class PredictionResponse(BaseModel):
     """
     Response model for price prediction.
-    
-    Requirements: 11.2, 11.3
     """
-    
     predicted_price: float = Field(
         ...,
-        description="Predicted house price rounded to 2 decimal places"
+        description="Predicted house price in INR rounded to 2 decimal places"
     )
-    
+    price_range: PriceRange = Field(
+        ...,
+        description="Empirical 90% prediction interval [lower, upper] in INR"
+    )
+    currency: str = Field(
+        default="INR",
+        description="Currency code (INR)"
+    )
     confidence_metrics: ConfidenceMetrics = Field(
         ...,
-        description="Confidence metrics including confidence interval"
+        description="Confidence metrics containing lower_bound and upper_bound"
     )
+
+
+class OptionsResponse(BaseModel):
+    """
+    Response model for available dropdown options.
+    """
+    cities: List[str] = Field(..., description="List of supported Indian cities")
+    localities: Dict[str, List[str]] = Field(..., description="Mapping of city to localities")
+    property_types: List[str] = Field(..., description="List of property types")
+    furnishing_types: List[str] = Field(..., description="List of furnishing types")
+
+
+class BenchmarkItem(BaseModel):
+    """
+    Model comparison benchmark item.
+    """
+    model: str
+    r2: float
+    mae: float
+    rmse: float
+
+
+class ModelInfoResponse(BaseModel):
+    """
+    Response model for model comparison and dataset documentation.
+    """
+    best_model: str
+    features: List[str]
+    benchmark: List[BenchmarkItem]
+    interval_ratios: Dict[str, float]
+    dataset_summary: Dict[str, Any]
 
 
 class HealthResponse(BaseModel):
     """
     Response model for health check endpoint.
-    
-    Requirements: 11.4
     """
-    
     status: Literal["healthy", "unhealthy"] = Field(
         ...,
         description="Health status of the service"
     )
-    
     model_loaded: bool = Field(
         ...,
         description="Whether the ML model is loaded in memory"
@@ -169,10 +185,7 @@ class HealthResponse(BaseModel):
 class ErrorResponse(BaseModel):
     """
     Response model for error responses.
-    
-    Requirements: 11.5
     """
-    
     error: str = Field(
         ...,
         description="Descriptive error message"

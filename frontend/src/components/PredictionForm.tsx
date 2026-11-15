@@ -1,15 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Maximize2,
   Bed,
   Bath,
   MapPin,
-  Calendar,
+  Building,
+  Armchair,
   Sparkles,
   RotateCcw,
 } from 'lucide-react';
-import { FormData, ValidationErrors, PredictionResult as PredictionResultType, ErrorObject } from '../types';
+import {
+  FormData,
+  ValidationErrors,
+  PredictionResult as PredictionResultType,
+  ErrorObject,
+  OptionsData
+} from '../types';
 import { validateField, validateForm } from '../utils/validation';
 import { PredictionResult } from './PredictionResult';
 
@@ -19,35 +26,77 @@ const API_BASE_URL =
   'http://localhost:8000';
 
 const initialFormData: FormData = {
-  square_footage: '',
-  bedrooms: '',
+  area_sqft: '',
+  bhk: '',
   bathrooms: '',
-  location: '',
-  year_built: '',
+  city: '',
+  locality: '',
+  property_type: 'Apartment',
+  furnishing: 'Semi-furnished',
+};
+
+const defaultOptions: OptionsData = {
+  cities: ['Bengaluru', 'Chennai', 'Delhi NCR', 'Hyderabad', 'Kolkata', 'Mumbai', 'Pune'],
+  localities: {
+    'Pune': ['Wakad', 'Baner', 'Hinjewadi', 'Kothrud', 'Viman Nagar', 'Kalyani Nagar', 'Other'],
+    'Bengaluru': ['Whitefield', 'Electronic City', 'Indiranagar', 'HSR Layout', 'Koramangala', 'Other'],
+    'Mumbai': ['Andheri West', 'Bandra West', 'Thane West', 'Kandivali East', 'Powai', 'Other'],
+    'Delhi NCR': ['Sector 62 Noida', 'Dwarka', 'Sector 57 Gurgaon', 'Rohini', 'Other'],
+    'Hyderabad': ['Gachibowli', 'Hitech City', 'Madhapur', 'Kondapur', 'Other'],
+    'Chennai': ['Velachery', 'OMR', 'Anna Nagar', 'Adyar', 'Other'],
+    'Kolkata': ['New Town', 'Rajarhat', 'Salt Lake', 'Ballygunge', 'Other'],
+  },
+  property_types: ['Apartment', 'Builder Floor', 'Independent House', 'Villa'],
+  furnishing_types: ['Furnished', 'Semi-furnished', 'Unfurnished'],
 };
 
 export const PredictionForm: React.FC = () => {
   const [formData, setFormData] = useState<FormData>(initialFormData);
+  const [options, setOptions] = useState<OptionsData>(defaultOptions);
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [touched, setTouched] = useState<Record<keyof FormData, boolean>>({
-    square_footage: false,
-    bedrooms: false,
+    area_sqft: false,
+    bhk: false,
     bathrooms: false,
-    location: false,
-    year_built: false,
+    city: false,
+    locality: false,
+    property_type: false,
+    furnishing: false,
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [prediction, setPrediction] = useState<PredictionResultType | null>(null);
   const [error, setError] = useState<ErrorObject | null>(null);
 
-  // Check overall form validity
+  // Fetch dynamic metadata options from backend
+  useEffect(() => {
+    const fetchOptions = async () => {
+      try {
+        const res = await axios.get<OptionsData>(`${API_BASE_URL}/options`, { timeout: 5000 });
+        if (res.data && res.data.cities && res.data.cities.length > 0) {
+          setOptions(res.data);
+        }
+      } catch (err) {
+        // Fallback options will remain in place
+      }
+    };
+    fetchOptions();
+  }, []);
+
   const { isValid } = validateForm(formData);
 
   const handleInputChange = (field: keyof FormData, value: string) => {
-    const updatedForm = { ...formData, [field]: value };
+    let updatedForm = { ...formData, [field]: value };
+
+    // Cascading City -> Locality reset if changed
+    if (field === 'city') {
+      const cityLocalities = options.localities[value] || [];
+      if (!cityLocalities.includes(formData.locality)) {
+        updatedForm.locality = cityLocalities[0] || '';
+      }
+    }
+
     setFormData(updatedForm);
 
-    // Validate if field has been touched
     if (touched[field]) {
       const fieldError = validateField(field, value);
       setErrors((prev) => ({
@@ -69,13 +118,14 @@ export const PredictionForm: React.FC = () => {
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    // Mark all as touched
     setTouched({
-      square_footage: true,
-      bedrooms: true,
+      area_sqft: true,
+      bhk: true,
       bathrooms: true,
-      location: true,
-      year_built: true,
+      city: true,
+      locality: true,
+      property_type: true,
+      furnishing: true,
     });
 
     const validation = validateForm(formData);
@@ -85,25 +135,26 @@ export const PredictionForm: React.FC = () => {
       return;
     }
 
-    // Clear previous errors and results before new request
     setError(null);
     setPrediction(null);
     setIsSubmitting(true);
 
     try {
       const payload = {
-        square_footage: parseFloat(formData.square_footage),
-        bedrooms: parseInt(formData.bedrooms, 10),
+        area_sqft: parseFloat(formData.area_sqft),
+        bhk: parseInt(formData.bhk, 10),
         bathrooms: parseFloat(formData.bathrooms),
-        location: formData.location.trim(),
-        year_built: parseInt(formData.year_built, 10),
+        city: formData.city.trim(),
+        locality: formData.locality.trim(),
+        property_type: formData.property_type.trim(),
+        furnishing: formData.furnishing.trim(),
       };
 
       const response = await axios.post<PredictionResultType>(
         `${API_BASE_URL}/predict`,
         payload,
         {
-          timeout: 30000, // 30-second timeout
+          timeout: 30000,
           headers: {
             'Content-Type': 'application/json',
           },
@@ -164,11 +215,13 @@ export const PredictionForm: React.FC = () => {
     setFormData(initialFormData);
     setErrors({});
     setTouched({
-      square_footage: false,
-      bedrooms: false,
+      area_sqft: false,
+      bhk: false,
       bathrooms: false,
-      location: false,
-      year_built: false,
+      city: false,
+      locality: false,
+      property_type: false,
+      furnishing: false,
     });
     setPrediction(null);
     setError(null);
@@ -176,15 +229,22 @@ export const PredictionForm: React.FC = () => {
 
   const loadSampleData = () => {
     setFormData({
-      square_footage: '2450',
-      bedrooms: '4',
-      bathrooms: '2.5',
-      location: 'Austin, TX',
-      year_built: '2016',
+      area_sqft: '1150',
+      bhk: '2',
+      bathrooms: '2',
+      city: 'Pune',
+      locality: 'Wakad',
+      property_type: 'Apartment',
+      furnishing: 'Semi-furnished',
     });
     setErrors({});
     setError(null);
   };
+
+  // Localities for the selected city
+  const currentLocalities = formData.city
+    ? options.localities[formData.city] || ['Other']
+    : [];
 
   return (
     <div className="predictor-container">
@@ -194,71 +254,71 @@ export const PredictionForm: React.FC = () => {
           <div className="form-header">
             <div>
               <h2 className="form-title">Property Details</h2>
-              <p className="form-subtitle">Enter property specs to calculate market valuation</p>
+              <p className="form-subtitle">Enter Indian residential property specs for AI market valuation</p>
             </div>
             <button
               type="button"
               onClick={loadSampleData}
               className="btn-link"
-              title="Fill form with sample data"
+              title="Fill form with sample Pune (Wakad) property"
             >
-              Fill Sample
+              Fill Sample (Pune)
             </button>
           </div>
 
           <form onSubmit={handleSubmit} noValidate className="property-form">
-            {/* Square Footage */}
+            {/* Area in Sq Ft */}
             <div className="form-group">
-              <label htmlFor="square_footage" className="form-label">
+              <label htmlFor="area_sqft" className="form-label">
                 <Maximize2 size={16} />
-                <span>Square Footage</span>
+                <span>Super Built-up / Carpet Area</span>
                 <span className="required-star">*</span>
               </label>
               <div className="input-wrapper">
                 <input
-                  id="square_footage"
+                  id="area_sqft"
                   type="number"
-                  name="square_footage"
-                  value={formData.square_footage}
-                  onChange={(e) => handleInputChange('square_footage', e.target.value)}
-                  onBlur={() => handleBlur('square_footage')}
-                  placeholder="e.g. 2400"
-                  min="1"
-                  max="100000"
-                  className={`form-input ${errors.square_footage ? 'input-error' : ''}`}
+                  name="area_sqft"
+                  value={formData.area_sqft}
+                  onChange={(e) => handleInputChange('area_sqft', e.target.value)}
+                  onBlur={() => handleBlur('area_sqft')}
+                  placeholder="e.g. 1150"
+                  min="200"
+                  max="20000"
+                  className={`form-input ${errors.area_sqft ? 'input-error' : ''}`}
                   disabled={isSubmitting}
                 />
                 <span className="input-unit">sq ft</span>
               </div>
-              {errors.square_footage && (
-                <p className="field-error" role="alert">{errors.square_footage}</p>
+              {errors.area_sqft && (
+                <p className="field-error" role="alert">{errors.area_sqft}</p>
               )}
             </div>
 
-            {/* Bedrooms & Bathrooms Row */}
+            {/* BHK & Bathrooms Row */}
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="bedrooms" className="form-label">
+                <label htmlFor="bhk" className="form-label">
                   <Bed size={16} />
-                  <span>Bedrooms</span>
+                  <span>BHK / Bedrooms</span>
                   <span className="required-star">*</span>
                 </label>
                 <input
-                  id="bedrooms"
+                  id="bhk"
                   type="number"
-                  name="bedrooms"
-                  value={formData.bedrooms}
-                  onChange={(e) => handleInputChange('bedrooms', e.target.value)}
-                  onBlur={() => handleBlur('bedrooms')}
-                  placeholder="e.g. 3"
-                  min="0"
-                  max="20"
+                  name="bhk"
+                  value={formData.bhk}
+                  onChange={(e) => handleInputChange('bhk', e.target.value)}
+                  onBlur={() => handleBlur('bhk')}
+                  placeholder="e.g. 2"
+                  min="1"
+                  max="10"
                   step="1"
-                  className={`form-input ${errors.bedrooms ? 'input-error' : ''}`}
+                  className={`form-input ${errors.bhk ? 'input-error' : ''}`}
                   disabled={isSubmitting}
                 />
-                {errors.bedrooms && (
-                  <p className="field-error" role="alert">{errors.bedrooms}</p>
+                {errors.bhk && (
+                  <p className="field-error" role="alert">{errors.bhk}</p>
                 )}
               </div>
 
@@ -275,9 +335,9 @@ export const PredictionForm: React.FC = () => {
                   value={formData.bathrooms}
                   onChange={(e) => handleInputChange('bathrooms', e.target.value)}
                   onBlur={() => handleBlur('bathrooms')}
-                  placeholder="e.g. 2.5"
-                  min="0"
-                  max="20"
+                  placeholder="e.g. 2"
+                  min="1"
+                  max="10"
                   step="0.5"
                   className={`form-input ${errors.bathrooms ? 'input-error' : ''}`}
                   disabled={isSubmitting}
@@ -288,53 +348,123 @@ export const PredictionForm: React.FC = () => {
               </div>
             </div>
 
-            {/* Location */}
-            <div className="form-group">
-              <label htmlFor="location" className="form-label">
-                <MapPin size={16} />
-                <span>Location (City, State / Neighborhood)</span>
-                <span className="required-star">*</span>
-              </label>
-              <input
-                id="location"
-                type="text"
-                name="location"
-                value={formData.location}
-                onChange={(e) => handleInputChange('location', e.target.value)}
-                onBlur={() => handleBlur('location')}
-                placeholder="e.g. San Francisco, CA"
-                maxLength={200}
-                className={`form-input ${errors.location ? 'input-error' : ''}`}
-                disabled={isSubmitting}
-              />
-              {errors.location && (
-                <p className="field-error" role="alert">{errors.location}</p>
-              )}
+            {/* City & Locality Cascading Row */}
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="city" className="form-label">
+                  <MapPin size={16} />
+                  <span>City</span>
+                  <span className="required-star">*</span>
+                </label>
+                <select
+                  id="city"
+                  name="city"
+                  value={formData.city}
+                  onChange={(e) => handleInputChange('city', e.target.value)}
+                  onBlur={() => handleBlur('city')}
+                  className={`form-input ${errors.city ? 'input-error' : ''}`}
+                  disabled={isSubmitting}
+                >
+                  <option value="">Select Indian City</option>
+                  {options.cities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                {errors.city && (
+                  <p className="field-error" role="alert">{errors.city}</p>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="locality" className="form-label">
+                  <MapPin size={16} />
+                  <span>Locality / Sector</span>
+                  <span className="required-star">*</span>
+                </label>
+                {currentLocalities.length > 0 ? (
+                  <select
+                    id="locality"
+                    name="locality"
+                    value={formData.locality}
+                    onChange={(e) => handleInputChange('locality', e.target.value)}
+                    onBlur={() => handleBlur('locality')}
+                    className={`form-input ${errors.locality ? 'input-error' : ''}`}
+                    disabled={isSubmitting || !formData.city}
+                  >
+                    <option value="">Select Locality</option>
+                    {currentLocalities.map((loc) => (
+                      <option key={loc} value={loc}>{loc}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="locality"
+                    type="text"
+                    name="locality"
+                    value={formData.locality}
+                    onChange={(e) => handleInputChange('locality', e.target.value)}
+                    onBlur={() => handleBlur('locality')}
+                    placeholder="e.g. Wakad"
+                    maxLength={100}
+                    className={`form-input ${errors.locality ? 'input-error' : ''}`}
+                    disabled={isSubmitting}
+                  />
+                )}
+                {errors.locality && (
+                  <p className="field-error" role="alert">{errors.locality}</p>
+                )}
+              </div>
             </div>
 
-            {/* Year Built */}
-            <div className="form-group">
-              <label htmlFor="year_built" className="form-label">
-                <Calendar size={16} />
-                <span>Year Built</span>
-                <span className="required-star">*</span>
-              </label>
-              <input
-                id="year_built"
-                type="number"
-                name="year_built"
-                value={formData.year_built}
-                onChange={(e) => handleInputChange('year_built', e.target.value)}
-                onBlur={() => handleBlur('year_built')}
-                placeholder="e.g. 2015"
-                min="1800"
-                max={new Date().getFullYear() + 1}
-                className={`form-input ${errors.year_built ? 'input-error' : ''}`}
-                disabled={isSubmitting}
-              />
-              {errors.year_built && (
-                <p className="field-error" role="alert">{errors.year_built}</p>
-              )}
+            {/* Property Type & Furnishing Row */}
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="property_type" className="form-label">
+                  <Building size={16} />
+                  <span>Property Type</span>
+                  <span className="required-star">*</span>
+                </label>
+                <select
+                  id="property_type"
+                  name="property_type"
+                  value={formData.property_type}
+                  onChange={(e) => handleInputChange('property_type', e.target.value)}
+                  onBlur={() => handleBlur('property_type')}
+                  className={`form-input ${errors.property_type ? 'input-error' : ''}`}
+                  disabled={isSubmitting}
+                >
+                  {options.property_types.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                {errors.property_type && (
+                  <p className="field-error" role="alert">{errors.property_type}</p>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="furnishing" className="form-label">
+                  <Armchair size={16} />
+                  <span>Furnishing Status</span>
+                  <span className="required-star">*</span>
+                </label>
+                <select
+                  id="furnishing"
+                  name="furnishing"
+                  value={formData.furnishing}
+                  onChange={(e) => handleInputChange('furnishing', e.target.value)}
+                  onBlur={() => handleBlur('furnishing')}
+                  className={`form-input ${errors.furnishing ? 'input-error' : ''}`}
+                  disabled={isSubmitting}
+                >
+                  {options.furnishing_types.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                {errors.furnishing && (
+                  <p className="field-error" role="alert">{errors.furnishing}</p>
+                )}
+              </div>
             </div>
 
             {/* Action Buttons */}
@@ -345,7 +475,7 @@ export const PredictionForm: React.FC = () => {
                 className="btn-primary"
               >
                 <Sparkles size={18} />
-                <span>{isSubmitting ? 'Predicting...' : 'Predict House Price'}</span>
+                <span>{isSubmitting ? 'Predicting...' : 'Predict Property Price (₹)'}</span>
               </button>
 
               <button

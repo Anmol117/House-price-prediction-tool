@@ -1,123 +1,47 @@
-# House Price Prediction API - Backend
+# HomeValuate AI — Backend API
 
-## Overview
-
-This is the backend component of the House Price Prediction web application. It provides a REST API built with FastAPI that serves predictions from a pre-trained Linear Regression model.
+REST API built with **FastAPI** and **scikit-learn** to predict residential property prices in Indian metropolitan regions.
 
 ## Project Structure
 
 ```
 backend/
-├── __init__.py          # Backend package initialization
 ├── main.py              # FastAPI application entry point
+├── prepare_dataset.py   # Dataset ingestion and cleaning script
+├── train_model.py       # Model training and 3-model benchmark script
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Environment variable template
-├── models/              # Model loading and serving components
-│   └── __init__.py
-├── routes/              # API endpoint definitions
-│   └── __init__.py
-├── schemas/             # Pydantic request/response models
-│   └── __init__.py
+├── data/
+│   └── india_housing.csv # Cleaned Indian housing dataset (29,624 records)
+├── models/              # Model pipeline and server
+│   ├── model.joblib     # Serialized production pipeline
+│   ├── model_meta.json  # Metadata, benchmarks, and option lists
+│   └── model_server.py  # Model inference and interval calculation
+├── routes/              # FastAPI routers
+│   └── routes.py        # /predict, /options, /model-info, /health
+├── schemas/             # Pydantic validation schemas
+│   └── schemas.py
 └── tests/               # Unit and integration tests
-    └── __init__.py
+    ├── test_main.py
+    ├── test_routes.py
+    └── test_utils.py
 ```
 
-## Environment Variables
+## Running the Backend
 
-The application requires the following environment variables:
-
-### Required
-
-- **MODEL_PATH**: Path to the trained model file (pickle or joblib format)
-  - Example: `./models/linear_regression_model.pkl`
-
-### Optional
-
-- **PORT**: Port for the FastAPI backend server (default: 8000)
-  - Must be between 1024-65535
-  - Example: `8000`
-
-- **CORS_ALLOWED_ORIGINS**: Comma-separated list of allowed origins for CORS
-  - Default: `http://localhost:3000`
-  - Example: `http://localhost:3000,https://example.com`
-
-## Installation
-
-1. Create a virtual environment:
 ```bash
-python -m venv venv
-```
-
-2. Activate the virtual environment:
-   - Windows: `venv\Scripts\activate`
-   - Unix/macOS: `source venv/bin/activate`
-
-3. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-4. Create a `.env` file from the example:
-```bash
-cp .env.example .env
-```
+# Download dataset
+python prepare_dataset.py
 
-5. Edit `.env` and set the required environment variables.
+# Train & benchmark models
+python train_model.py
 
-## Running the Application
-
-### Development Mode
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Production Mode
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-### Using Python Directly
-
-```bash
-python main.py
-```
-
-## Running Tests
-
-```bash
+# Run tests
 pytest
+
+# Start server
+uvicorn main:app --reload --port 8000
 ```
-
-Run tests with coverage:
-```bash
-pytest --cov=backend --cov-report=html
-```
-
-## API Endpoints
-
-### GET /
-Root endpoint returning API information.
-
-**Response:**
-```json
-{
-  "name": "House Price Prediction API",
-  "version": "1.0.0",
-  "status": "running"
-}
-```
-
-More endpoints will be added as development progresses.
-
-## Dependencies
-
-- **fastapi**: Web framework for building APIs
-- **uvicorn**: ASGI server for running FastAPI
-- **pydantic**: Data validation using Python type annotations
-- **scikit-learn**: Machine learning library for model serving
-- **python-multipart**: Support for form data parsing
-- **pytest**: Testing framework
-- **hypothesis**: Property-based testing library
-- **python-dotenv**: Environment variable management

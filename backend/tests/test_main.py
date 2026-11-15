@@ -10,10 +10,7 @@ from unittest import mock
 # Ensure parent directory is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-try:
-    from main import validate_port, app
-except ImportError:
-    from backend.main import validate_port, app
+from main import validate_port, app
 
 
 def test_validate_port_valid():
@@ -51,11 +48,13 @@ def test_root_endpoint():
 
 
 def test_model_info_endpoint():
-    """Test that GET /model-info returns 200 and model details."""
+    """Test that GET /model-info returns 200 and Indian model benchmark details."""
     from fastapi.testclient import TestClient
-    client = TestClient(app)
-    response = client.get("/model-info")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["model_type"] == "Linear Regression"
-    assert len(data["features"]) == 5
+    with TestClient(app) as client:
+        response = client.get("/model-info")
+        assert response.status_code == 200
+        data = response.json()
+        assert "best_model" in data
+        assert "benchmark" in data
+        assert len(data["benchmark"]) >= 3
+        assert "dataset_summary" in data

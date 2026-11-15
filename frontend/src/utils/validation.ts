@@ -1,29 +1,29 @@
 import { FormData, ValidationErrors } from '../types';
 
-export function validateSquareFootage(value: string): string | null {
+export function validateAreaSqft(value: string): string | null {
   if (!value || value.trim() === '') {
-    return 'Square footage is required';
+    return 'Area in square feet is required';
   }
   const num = Number(value);
   if (isNaN(num)) {
-    return 'Square footage must be a valid number';
+    return 'Area must be a valid number';
   }
-  if (num < 1 || num > 100000) {
-    return 'Square footage must be between 1 and 100,000 sq ft';
+  if (num < 200 || num > 20000) {
+    return 'Area must be between 200 and 20,000 sq ft';
   }
   return null;
 }
 
-export function validateBedrooms(value: string): string | null {
+export function validateBHK(value: string): string | null {
   if (!value || value.trim() === '') {
-    return 'Number of bedrooms is required';
+    return 'Number of BHK / bedrooms is required';
   }
   const num = Number(value);
   if (isNaN(num) || !Number.isInteger(num)) {
-    return 'Bedrooms must be a whole number';
+    return 'BHK must be a whole number';
   }
-  if (num < 0 || num > 20) {
-    return 'Bedrooms must be between 0 and 20';
+  if (num < 1 || num > 10) {
+    return 'BHK must be between 1 and 10';
   }
   return null;
 }
@@ -36,59 +36,63 @@ export function validateBathrooms(value: string): string | null {
   if (isNaN(num)) {
     return 'Bathrooms must be a valid number';
   }
-  if (num < 0 || num > 20) {
-    return 'Bathrooms must be between 0 and 20';
+  if (num < 1 || num > 10) {
+    return 'Bathrooms must be between 1 and 10';
   }
   // Precision check: multiple of 0.5
   if (Math.round(num * 2) !== num * 2) {
-    return 'Bathrooms must be in increments of 0.5 (e.g. 1.5, 2.0)';
+    return 'Bathrooms must be in increments of 0.5 (e.g. 1.0, 1.5, 2.0)';
   }
   return null;
 }
 
-export function validateLocation(value: string): string | null {
+export function validateCity(value: string): string | null {
   if (!value || value.trim() === '') {
-    return 'Location is required';
-  }
-  if (value.length > 200) {
-    return 'Location cannot exceed 200 characters';
-  }
-  const pattern = /^[a-zA-Z0-9 ,.\-']+$/;
-  if (!pattern.test(value)) {
-    return 'Location can only contain letters, numbers, spaces, commas, periods, hyphens, and apostrophes';
+    return 'Please select a city';
   }
   return null;
 }
 
-export function validateYearBuilt(value: string): string | null {
+export function validateLocality(value: string): string | null {
   if (!value || value.trim() === '') {
-    return 'Year built is required';
+    return 'Please select or enter a locality';
   }
-  const num = Number(value);
-  const currentYear = new Date().getFullYear();
-  const maxYear = currentYear + 1;
+  if (value.length > 100) {
+    return 'Locality cannot exceed 100 characters';
+  }
+  return null;
+}
 
-  if (isNaN(num) || !Number.isInteger(num)) {
-    return 'Year built must be a whole year';
+export function validatePropertyType(value: string): string | null {
+  if (!value || value.trim() === '') {
+    return 'Please select a property type';
   }
-  if (num < 1800 || num > maxYear) {
-    return `Year built must be between 1800 and ${maxYear}`;
+  return null;
+}
+
+export function validateFurnishing(value: string): string | null {
+  if (!value || value.trim() === '') {
+    return 'Please select furnishing status';
   }
   return null;
 }
 
 export function validateField(field: keyof FormData, value: string): string | null {
   switch (field) {
-    case 'square_footage':
-      return validateSquareFootage(value);
-    case 'bedrooms':
-      return validateBedrooms(value);
+    case 'area_sqft':
+      return validateAreaSqft(value);
+    case 'bhk':
+      return validateBHK(value);
     case 'bathrooms':
       return validateBathrooms(value);
-    case 'location':
-      return validateLocation(value);
-    case 'year_built':
-      return validateYearBuilt(value);
+    case 'city':
+      return validateCity(value);
+    case 'locality':
+      return validateLocality(value);
+    case 'property_type':
+      return validatePropertyType(value);
+    case 'furnishing':
+      return validateFurnishing(value);
     default:
       return null;
   }
@@ -97,20 +101,26 @@ export function validateField(field: keyof FormData, value: string): string | nu
 export function validateForm(formData: FormData): { isValid: boolean; errors: ValidationErrors } {
   const errors: ValidationErrors = {};
 
-  const sqftErr = validateSquareFootage(formData.square_footage);
-  if (sqftErr) errors.square_footage = sqftErr;
+  const areaErr = validateAreaSqft(formData.area_sqft);
+  if (areaErr) errors.area_sqft = areaErr;
 
-  const bedErr = validateBedrooms(formData.bedrooms);
-  if (bedErr) errors.bedrooms = bedErr;
+  const bhkErr = validateBHK(formData.bhk);
+  if (bhkErr) errors.bhk = bhkErr;
 
   const bathErr = validateBathrooms(formData.bathrooms);
   if (bathErr) errors.bathrooms = bathErr;
 
-  const locErr = validateLocation(formData.location);
-  if (locErr) errors.location = locErr;
+  const cityErr = validateCity(formData.city);
+  if (cityErr) errors.city = cityErr;
 
-  const yearErr = validateYearBuilt(formData.year_built);
-  if (yearErr) errors.year_built = yearErr;
+  const locErr = validateLocality(formData.locality);
+  if (locErr) errors.locality = locErr;
+
+  const typeErr = validatePropertyType(formData.property_type);
+  if (typeErr) errors.property_type = typeErr;
+
+  const furnErr = validateFurnishing(formData.furnishing);
+  if (furnErr) errors.furnishing = furnErr;
 
   const isValid = Object.keys(errors).length === 0;
   return { isValid, errors };

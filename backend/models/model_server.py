@@ -1,14 +1,16 @@
 """
-Model Server component for loading and serving predictions from trained ML model.
+Model Server component for loading and serving predictions from trained ML pipeline.
+Configured for Indian Metropolitan Housing Price Prediction.
 """
 
 import os
 import sys
-import pickle
+import json
 import joblib
 import logging
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 import numpy as np
+import pandas as pd
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,31 +19,38 @@ logger = logging.getLogger(__name__)
 
 class ModelServer:
     """
-    Model Server for loading, validating, and serving predictions from trained Linear Regression model.
+    Model Server for loading, validating, and serving predictions from trained ML pipeline.
     
     Attributes:
-        model: scikit-learn LinearRegression instance
+        model: scikit-learn Pipeline instance
+        meta: Dictionary loaded from model_meta.json
         feature_names: List of expected feature names in correct order
         is_loaded: Boolean indicating successful model load
-        
-    Requirements: 6.1-6.7
     """
     
     def __init__(self):
         """Initialize ModelServer with empty state."""
         self.model: Optional[object] = None
+        self.meta: Dict[str, Any] = {}
         self.feature_names: list[str] = [
-            "square_footage",
-            "bedrooms",
+            "area_sqft",
+            "bhk",
             "bathrooms",
-            "location_encoded",  # Assuming location is encoded in model
-            "year_built"
+            "city",
+            "locality",
+            "property_type",
+            "furnishing"
         ]
+        self.interval_ratios: Dict[str, float] = {"lower": 0.5, "upper": 2.0}
+        self.cities: list[str] = []
+        self.localities: Dict[str, list[str]] = {}
+        self.property_types: list[str] = []
+        self.furnishing_types: list[str] = []
         self.is_loaded: bool = False
     
     def load_model(self, path: str) -> None:
         """
-        Load model from pickle or joblib file.
+        Load model from joblib (or pickle) and metadata from companion json.
         
         Args:
             path: Path to the model file
@@ -49,8 +58,6 @@ class ModelServer:
         Raises:
             FileNotFoundError: If model file not found
             Exception: If model fails to deserialize or validate
-            
-        Requirements: 6.1, 6.2, 6.6
         """
         if not os.path.exists(path):
             error_msg = f"Model file not found at {path}"
@@ -59,12 +66,21 @@ class ModelServer:
             sys.exit(1)
         
         try:
-            # Try loading with joblib first, then pickle
-            try:
-                self.model = joblib.load(path)
-            except Exception:
-                with open(path, 'rb') as f:
-                    self.model = pickle.load(f)
+            # Load trained pipeline
+            self.model = joblib.load(path)
+            
+            # Load metadata
+            meta_path = os.path.join(os.path.dirname(path), "model_meta.json")
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    self.meta = json.load(f)
+                    self.interval_ratios = self.meta.get("interval_ratios", {"lower": 0.5, "upper": 2.0})
+                    self.cities = self.meta.get("cities", [])
+                    self.localities = self.meta.get("localities", {})
+                    self.property_types = self.meta.get("property_types", [])
+                    self.furnishing_types = self.meta.get("furnishing_types", [])
+                    if "features" in self.meta:
+                        self.feature_names = self.meta["features"]
             
             # Validate the loaded model
             if not self.validate_model():
@@ -77,7 +93,7 @@ class ModelServer:
             logger.info("Model loaded successfully")
             print("Model loaded successfully")
             
-        except (pickle.UnpicklingError, Exception) as e:
+        except Exception as e:
             error_msg = f"Invalid model file format: {str(e)}"
             logger.error(error_msg)
             print("Invalid model file format", file=sys.stderr)
@@ -89,117 +105,129 @@ class ModelServer:
         
         Returns:
             True if model is valid, False otherwise
-            
-        Requirements: 6.6
         """
         if self.model is None:
             return False
         
-        # Check for required methods and attributes
         required_attrs = ['predict']
-        
         for attr in required_attrs:
             if not hasattr(self.model, attr):
                 logger.error(f"Model missing required attribute: {attr}")
                 return False
         
-        # For Linear Regression, check for coefficients (optional validation)
-        if hasattr(self.model, 'coef_') and hasattr(self.model, 'intercept_'):
-            logger.info("Model validated: Linear Regression with coefficients found")
-        
         return True
     
-    def transform_input(self, data: Dict) -> np.ndarray:
+    def transform_input(self, data: Dict) -> pd.DataFrame:
         """
-        Convert request data to model input format.
-        
-        Transforms property details dictionary to numpy array in the correct
-        feature order matching training data format.
+        Convert request data to pandas DataFrame format matching model pipeline.
         
         Args:
             data: Dictionary with property details
             
         Returns:
-            Numpy array ready for model prediction
+            1-row DataFrame ready for model prediction
             
         Raises:
-            ValueError: If data contains unknown features
-            
-        Requirements: 6.4, 6.7
+            ValueError: If data contains unknown features or unsupported city
         """
-        # Check for unknown features
-        expected_keys = {"square_footage", "bedrooms", "bathrooms", "location", "year_built"}
+        expected_keys = set(self.feature_names)
         provided_keys = set(data.keys())
         
         unknown_features = provided_keys - expected_keys
         if unknown_features:
-            unknown = ', '.join(unknown_features)
+            unknown = ', '.join(sorted(unknown_features))
             raise ValueError(f"Unknown feature: {unknown}")
         
-        # For now, we'll do a simple encoding of location
-        # In a real implementation, this would use the same encoding as training
-        # For simplicity, we'll use a hash-based encoding
-        location_encoded = hash(data.get("location", "")) % 1000
+        city = str(data.get("city", "")).strip()
+        if self.cities and city not in self.cities:
+            raise ValueError(f"Unsupported city '{city}'. Supported cities: {', '.join(self.cities)}")
         
-        # Create array in correct feature order
-        features = np.array([[
-            float(data["square_footage"]),
-            float(data["bedrooms"]),
-            float(data["bathrooms"]),
-            float(location_encoded),
-            float(data["year_built"])
-        ]])
+        locality = str(data.get("locality", "")).strip()
+        # If locality not in known list for this city, map to 'Other' if available, else retain
+        city_locs = self.localities.get(city, [])
+        if city_locs and locality not in city_locs:
+            if "Other" in city_locs:
+                locality = "Other"
         
-        return features
+        row = {
+            "area_sqft": float(data["area_sqft"]),
+            "bhk": int(data["bhk"]),
+            "bathrooms": float(data["bathrooms"]),
+            "city": city,
+            "locality": locality,
+            "property_type": str(data.get("property_type", "Apartment")).strip(),
+            "furnishing": str(data.get("furnishing", "Semi-furnished")).strip()
+        }
+        
+        return pd.DataFrame([row])
     
-    def predict(self, data: Dict) -> float:
+    def predict(self, data: Dict) -> Tuple[float, float, float]:
         """
-        Generate price prediction from property details.
+        Generate price prediction and empirical interval from property details.
         
         Args:
-            data: Dictionary with property details (square_footage, bedrooms, bathrooms, location, year_built)
+            data: Dictionary with property details
             
         Returns:
-            Predicted price as float
+            Tuple of (predicted_price, lower_bound, upper_bound) in INR
             
         Raises:
             ValueError: If model not loaded or invalid input
-            
-        Requirements: 2.3, 6.5
         """
         if not self.is_loaded or self.model is None:
             raise ValueError("Model not loaded")
         
-        # Transform input to model format
-        features = self.transform_input(data)
+        df_features = self.transform_input(data)
         
-        # Generate prediction
-        prediction = self.model.predict(features)
+        # Pipeline predicts log(price)
+        pred_log = self.model.predict(df_features)
+        raw_pred = float(np.expm1(pred_log[0]))
         
-        # Return single float value
-        return float(prediction[0])
+        # Enforce realistic lower bound (at least 1 Lakh INR)
+        predicted_price = round(max(raw_pred, 100000.0), 2)
+        
+        # Empirical prediction interval using test set residual ratios
+        low_ratio = self.interval_ratios.get("lower", 0.5)
+        high_ratio = self.interval_ratios.get("upper", 2.0)
+        
+        lower_bound = round(predicted_price * low_ratio, 2)
+        upper_bound = round(predicted_price * high_ratio, 2)
+        
+        return predicted_price, lower_bound, upper_bound
     
     def calculate_confidence_interval(self, prediction: float) -> Tuple[float, float]:
         """
-        Calculate confidence interval for prediction.
-        
-        For a simple implementation, we'll use a fixed percentage range.
-        In a production system, this would use actual model uncertainty estimates.
+        Calculate empirical prediction interval for prediction.
         
         Args:
-            prediction: The predicted price
+            prediction: The predicted price in INR
             
         Returns:
             Tuple of (lower_bound, upper_bound)
-            
-        Requirements: 11.3
         """
-        # Use +/- 10% as confidence interval (simplified)
-        margin = prediction * 0.10
-        lower_bound = prediction - margin
-        upper_bound = prediction + margin
+        low_ratio = self.interval_ratios.get("lower", 0.5)
+        high_ratio = self.interval_ratios.get("upper", 2.0)
         
-        # Ensure bounds are non-negative
-        lower_bound = max(0, lower_bound)
+        lower_bound = round(prediction * low_ratio, 2)
+        upper_bound = round(prediction * high_ratio, 2)
         
         return (lower_bound, upper_bound)
+    
+    def get_options(self) -> Dict[str, Any]:
+        """Return available dropdown options for the frontend."""
+        return {
+            "cities": self.cities,
+            "localities": self.localities,
+            "property_types": self.property_types,
+            "furnishing_types": self.furnishing_types
+        }
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return model metadata, benchmark table, and dataset documentation."""
+        return {
+            "best_model": self.meta.get("best_model", "Random Forest"),
+            "features": self.feature_names,
+            "benchmark": self.meta.get("benchmark", []),
+            "interval_ratios": self.interval_ratios,
+            "dataset_summary": self.meta.get("dataset_summary", {})
+        }
